@@ -42,6 +42,13 @@
       background: #f9f9f9;
       font-size: 0.9em;
     }
+    /* Style for the undo button */
+    #undoPointBtn {
+      margin-top: 8px;
+      width: 100%;
+      padding: 6px;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
@@ -94,6 +101,7 @@
       <div class="control-group">
         <button id="newShapeBtn">Start New Shape</button>
         <p style="font-size:0.85em;">(Click near the first vertex to auto-close shape)</p>
+        <button id="undoPointBtn">Undo Last Point</button>
         <button id="clearAllBtn">Clear All Shapes</button>
         <p style="font-size:0.85em;">Select a shape by clicking near one of its vertices.</p>
       </div>
@@ -265,7 +273,6 @@
     /******************************
      * Transformation Log         *
      ******************************/
-    // The log will show cumulative translation, net rotation, and reflection counts.
     function updateTransformationLog() {
       const logDiv = document.getElementById("transformationLog");
       if (selectedShapeIndex === null) {
@@ -311,7 +318,7 @@
       return null;
     }
 
-    // Finish the current shape (if it has at least 3 points) and store it.
+    // Finish the current shape (if at least 3 points) and store it.
     function finishCurrentShape() {
       if (currentShape.length > 2) {
         let shapeObj = {
@@ -337,7 +344,7 @@
       const mousePos = getMousePos(e);
       currentMousePos = mousePos;
       
-      // If not in drawing mode, check for shape selection.
+      // If not drawing a new shape, allow selection if a finished shape is near.
       if (currentShape.length === 0) {
         const sel = findShapeUnderPoint(mousePos);
         if (sel !== null) {
@@ -410,7 +417,7 @@
       updateTransformationLog();
       redraw();
     });
-    // Custom reflection about a vertical line: for line x = a, new x = 2a - x.
+    // Custom reflection about a vertical line: x → 2a - x.
     document.getElementById("reflectVerticalBtn").addEventListener("click", () => {
       if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
       let a = parseInt(document.getElementById("reflectVerticalX").value, 10);
@@ -420,7 +427,7 @@
       updateTransformationLog();
       redraw();
     });
-    // Custom reflection about a horizontal line: for line y = b, new y = 2b - y.
+    // Custom reflection about a horizontal line: y → 2b - y.
     document.getElementById("reflectHorizontalBtn").addEventListener("click", () => {
       if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
       let b = parseInt(document.getElementById("reflectHorizontalY").value, 10);
@@ -464,6 +471,13 @@
       selectedShapeIndex = null;
       updateTransformationLog();
       redraw();
+    });
+    // Undo Last Point: Remove the last point from the current shape.
+    document.getElementById("undoPointBtn").addEventListener("click", () => {
+      if (currentShape.length > 0) {
+        currentShape.pop();
+        redraw();
+      }
     });
 
     /******************************
