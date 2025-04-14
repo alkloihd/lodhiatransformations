@@ -10,12 +10,15 @@
       border: 1px solid #333;
       background-color: #fff;
       cursor: crosshair;
+      /* Ensure the CSS size matches the canvas coordinate size */
+      width: 600px;
+      height: 600px;
     }
     #controls {
       margin-left: 20px;
       display: flex;
       flex-direction: column;
-      max-width: 300px;
+      max-width: 320px;
     }
     .control-group {
       margin-bottom: 15px;
@@ -29,6 +32,9 @@
       font-size: 16px; 
       margin: 2px;
     }
+    .custom-reflection {
+      margin-top: 8px;
+    }
     #transformationLog {
       border: 1px solid #aaa;
       padding: 5px;
@@ -39,7 +45,7 @@
   </style>
 </head>
 <body>
-  <h1>Morse Geometric Transformations Tracker</h1>
+  <h1>Geometric Transformations Tracker</h1>
   <div id="container">
     <canvas id="drawingCanvas" width="600" height="600"></canvas>
     <div id="controls">
@@ -55,12 +61,25 @@
       </div>
       <!-- Reflection Controls -->
       <div class="control-group">
-        <button id="reflectXBtn">Reflect over X-axis</button><br/>
-        <button id="reflectYBtn">Reflect over Y-axis</button>
+        <label>Reflection:</label>
+        <div>
+          <button id="reflectXBtn">Reflect over X-axis (y=0)</button><br/>
+          <button id="reflectYBtn">Reflect over Y-axis (x=0)</button>
+        </div>
+        <div class="custom-reflection">
+          <label>Reflect about vertical line (x = ?):</label>
+          <input type="number" id="reflectVerticalX" value="0" style="width:50px;">
+          <button id="reflectVerticalBtn">Reflect Vertical</button>
+        </div>
+        <div class="custom-reflection">
+          <label>Reflect about horizontal line (y = ?):</label>
+          <input type="number" id="reflectHorizontalY" value="0" style="width:50px;">
+          <button id="reflectHorizontalBtn">Reflect Horizontal</button>
+        </div>
       </div>
       <!-- Rotation Controls -->
       <div class="control-group">
-        <label>Rotation:</label><br/>
+        <label>Rotation (about origin):</label><br/>
         <select id="rotationSelect">
           <option value="-90">90° Clockwise</option>
           <option value="90">90° Counterclockwise</option>
@@ -68,6 +87,7 @@
           <option value="-270">270° Clockwise</option>
           <option value="270">270° Counterclockwise</option>
         </select>
+        <br/><br/>
         <button id="rotateBtn">Rotate</button>
       </div>
       <!-- Shape Management -->
@@ -93,25 +113,36 @@
      ******************************/
     const canvas = document.getElementById("drawingCanvas");
     const ctx = canvas.getContext("2d");
+    // Use canvas attributes (600 x 600) for internal coordinate system.
     const width = canvas.width, height = canvas.height;
-    const origin = { x: width / 2, y: height / 2 };  // Canvas center represents (0,0)
+    const origin = { x: width / 2, y: height / 2 };  // Center corresponds to (0, 0)
     const scale = 20;    // pixels per Cartesian unit
     const snapDist = 10; // snapping threshold in pixels
 
-    // Data structure for shapes:
-    // Each shape is an object: { original: [points], transformed: [points], log: { translation: {dx,dy}, rotation, reflection: {x, y} } }
+    // Each shape is stored as an object with an immutable "original" array,
+    // a "transformed" array (shown in blue), and a log for cumulative transformation.
     let shapes = [];         // finished shapes
-    let currentShape = [];   // points of shape currently being drawn
+    let currentShape = [];   // points of shape being drawn
     let selectedShapeIndex = null; // index into shapes array
 
-    // For tooltip tracking
+    // For accurate mouse tracking, use the canvas's bounding rect and adjust for scale.
+    function getMousePos(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      return { 
+        x: (e.clientX - rect.left) * scaleX,
+        y: (e.clientY - rect.top) * scaleY
+      };
+    }
+
+    // For tooltip: track current mouse position in canvas coordinate system.
     let currentMousePos = { x: 0, y: 0 };
 
     /******************************
      * Coordinate Conversion      *
      ******************************/
     function canvasToCartesian(pt) {
-      // Snaps to grid by rounding (ensuring integer coordinates)
       return {
         x: Math.round((pt.x - origin.x) / scale),
         y: Math.round((origin.y - pt.y) / scale)
@@ -129,21 +160,18 @@
      ******************************/
     function drawGrid() {
       ctx.strokeStyle = "#ddd";
-      // Vertical lines
       for (let x = 0; x <= width; x += scale) {
         ctx.beginPath();
         ctx.moveTo(x, 0);
         ctx.lineTo(x, height);
         ctx.stroke();
       }
-      // Horizontal lines
       for (let y = 0; y <= height; y += scale) {
         ctx.beginPath();
         ctx.moveTo(0, y);
         ctx.lineTo(width, y);
         ctx.stroke();
       }
-      // Draw axes in black
       ctx.strokeStyle = "#000";
       ctx.beginPath();
       ctx.moveTo(0, origin.y);
@@ -156,11 +184,9 @@
     }
 
     function drawShapes() {
-      // Draw finished shapes
       shapes.forEach((shapeObj, idx) => {
-        // If a shape is selected, show both its original (in red) and its transformed copy (in blue).
         if (idx === selectedShapeIndex) {
-          // Draw original in red (use a dashed outline)
+          // Draw original shape in red with a dashed outline.
           ctx.save();
           ctx.strokeStyle = "red";
           ctx.setLineDash([4, 4]);
@@ -187,7 +213,6 @@
           ctx.closePath();
           ctx.stroke();
         } else {
-          // Not selected: simply draw the transformed shape (or the only copy) in blue.
           ctx.strokeStyle = "blue";
           ctx.fillStyle = "blue";
           ctx.beginPath();
@@ -201,7 +226,6 @@
           ctx.stroke();
         }
       });
-      // Draw current shape (in magenta)
       if (currentShape.length > 0) {
         ctx.strokeStyle = "magenta";
         ctx.fillStyle = "magenta";
@@ -241,7 +265,7 @@
     /******************************
      * Transformation Log         *
      ******************************/
-    // Update the transformation log display for the selected shape.
+    // The log will show cumulative translation, net rotation, and reflection counts.
     function updateTransformationLog() {
       const logDiv = document.getElementById("transformationLog");
       if (selectedShapeIndex === null) {
@@ -249,28 +273,24 @@
         return;
       }
       const log = shapes[selectedShapeIndex].log;
-      // Translation string:
       let transStr = (log.translation.dx === 0 && log.translation.dy === 0) 
-        ? "None" 
-        : `(${log.translation.dx}, ${log.translation.dy})`;
-      // Rotation: normalize to [0,360)
+                     ? "None" 
+                     : `(${log.translation.dx}, ${log.translation.dy})`;
       let netRot = log.rotation % 360;
       if (netRot < 0) netRot += 360;
       let rotStr = (netRot === 0) 
-        ? "None" 
-        : ( (netRot === 90) 
-              ? "90° counterclockwise (or 270° clockwise)" 
-              : (netRot === 270) 
-                  ? "270° counterclockwise (or 90° clockwise)" 
-                  : netRot + "°" );
-      // Reflection:
+                   ? "None" 
+                   : ( (netRot === 90) 
+                         ? "90° counterclockwise (or 270° clockwise)" 
+                         : (netRot === 270) 
+                             ? "270° counterclockwise (or 90° clockwise)" 
+                             : netRot + "°" );
       let reflStr = "";
-      if (log.reflection.x === 0 && log.reflection.y === 0) {
-        reflStr = "None";
-      } else {
-        if(log.reflection.x > 0) reflStr += `X-axis: ${log.reflection.x} time(s); `;
-        if(log.reflection.y > 0) reflStr += `Y-axis: ${log.reflection.y} time(s)`;
-      }
+      if (log.reflection.axisX > 0) reflStr += `Reflected about X-axis: ${log.reflection.axisX} time(s); `;
+      if (log.reflection.axisY > 0) reflStr += `Reflected about Y-axis: ${log.reflection.axisY} time(s); `;
+      if (log.reflection.customVertical > 0) reflStr += `Reflected about vertical line: ${log.reflection.customVertical} time(s); `;
+      if (log.reflection.customHorizontal > 0) reflStr += `Reflected about horizontal line: ${log.reflection.customHorizontal} time(s); `;
+      if (reflStr === "") reflStr = "None";
       logDiv.innerHTML = `<strong>Translation:</strong> ${transStr}<br/>
                           <strong>Rotation:</strong> ${rotStr}<br/>
                           <strong>Reflection:</strong> ${reflStr}`;
@@ -279,36 +299,31 @@
     /******************************
      * Shape & Point Management   *
      ******************************/
-    // Find a nearby point from any finished shape (for shape selection)
+    // Check if a click is near any original vertex (for selection)
     function findShapeUnderPoint(mousePos) {
       for (let i = 0; i < shapes.length; i++) {
-        const shapeObj = shapes[i];
-        // Check the "original" vertices to allow comparison with the drawn shape.
-        for (let pt of shapeObj.original) {
+        for (let pt of shapes[i].original) {
           const cp = cartesianToCanvas(pt);
-          if (Math.hypot(mousePos.x - cp.x, mousePos.y - cp.y) < snapDist) {
+          if (Math.hypot(mousePos.x - cp.x, mousePos.y - cp.y) < snapDist)
             return i;
-          }
         }
       }
       return null;
     }
 
-    // When closing a shape (if new point is near first point)
+    // Finish the current shape (if it has at least 3 points) and store it.
     function finishCurrentShape() {
       if (currentShape.length > 2) {
-        // Create the shape object with an unchanged original and a transformed copy.
         let shapeObj = {
           original: currentShape.map(p => ({ x: p.x, y: p.y })),
           transformed: currentShape.map(p => ({ x: p.x, y: p.y })),
           log: {
             translation: { dx: 0, dy: 0 },
             rotation: 0,
-            reflection: { x: 0, y: 0 }
+            reflection: { axisX: 0, axisY: 0, customVertical: 0, customHorizontal: 0 }
           }
         };
         shapes.push(shapeObj);
-        // Auto-select the new shape
         selectedShapeIndex = shapes.length - 1;
       }
       currentShape = [];
@@ -318,12 +333,11 @@
     /******************************
      * Canvas Event Listeners     *
      ******************************/
-    canvas.addEventListener("click", function(e) {
-      const rect = canvas.getBoundingClientRect();
-      const mousePos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    canvas.addEventListener("click", (e) => {
+      const mousePos = getMousePos(e);
       currentMousePos = mousePos;
       
-      // If not drawing a new shape, check to see if user is selecting an existing shape.
+      // If not in drawing mode, check for shape selection.
       if (currentShape.length === 0) {
         const sel = findShapeUnderPoint(mousePos);
         if (sel !== null) {
@@ -334,38 +348,33 @@
         }
       }
       
-      // Convert canvas coordinates to Cartesian (snapped to grid)
       let cartPos = canvasToCartesian(mousePos);
-      // Auto-close: if currentShape has at least 2 points, and new point is near first point.
       if (currentShape.length >= 2) {
         const firstCanvas = cartesianToCanvas(currentShape[0]);
-        const newCanvas   = cartesianToCanvas(cartPos);
+        const newCanvas = cartesianToCanvas(cartPos);
         if (Math.hypot(firstCanvas.x - newCanvas.x, firstCanvas.y - newCanvas.y) < snapDist) {
           finishCurrentShape();
           redraw();
           return;
         }
       }
-      // Otherwise, add the point and redraw
       currentShape.push(cartPos);
       redraw();
     });
 
-    canvas.addEventListener("mousemove", function(e) {
-      const rect = canvas.getBoundingClientRect();
-      currentMousePos = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    canvas.addEventListener("mousemove", (e) => {
+      currentMousePos = getMousePos(e);
       redraw();
     });
 
     /******************************
      * Transformation Functions   *
      ******************************/
-    // Helper: deep clone an array of points.
     function clonePoints(points) {
       return points.map(p => ({ x: p.x, y: p.y }));
     }
 
-    // Translation (applied only to the transformed copy)
+    // Translation
     function doTranslate(dx, dy) {
       if (selectedShapeIndex === null) {
         alert("Please select a shape first.");
@@ -373,45 +382,61 @@
       }
       let shape = shapes[selectedShapeIndex];
       shape.transformed = shape.transformed.map(pt => ({ x: pt.x + dx, y: pt.y + dy }));
-      // Update cumulative translation
       shape.log.translation.dx += dx;
       shape.log.translation.dy += dy;
       updateTransformationLog();
       redraw();
     }
-
     document.getElementById("translateUpBtn").addEventListener("click", () => doTranslate(0, 1));
     document.getElementById("translateDownBtn").addEventListener("click", () => doTranslate(0, -1));
     document.getElementById("translateLeftBtn").addEventListener("click", () => doTranslate(-1, 0));
     document.getElementById("translateRightBtn").addEventListener("click", () => doTranslate(1, 0));
 
-    // Reflection over X-axis (flip vertical)
+    // Reflection over X-axis (y = 0)
     document.getElementById("reflectXBtn").addEventListener("click", () => {
       if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
       let shape = shapes[selectedShapeIndex];
       shape.transformed = shape.transformed.map(pt => ({ x: pt.x, y: -pt.y }));
-      shape.log.reflection.x += 1;
+      shape.log.reflection.axisX += 1;
       updateTransformationLog();
       redraw();
     });
-    // Reflection over Y-axis (flip horizontal)
+    // Reflection over Y-axis (x = 0)
     document.getElementById("reflectYBtn").addEventListener("click", () => {
       if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
       let shape = shapes[selectedShapeIndex];
       shape.transformed = shape.transformed.map(pt => ({ x: -pt.x, y: pt.y }));
-      shape.log.reflection.y += 1;
+      shape.log.reflection.axisY += 1;
+      updateTransformationLog();
+      redraw();
+    });
+    // Custom reflection about a vertical line: for line x = a, new x = 2a - x.
+    document.getElementById("reflectVerticalBtn").addEventListener("click", () => {
+      if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
+      let a = parseInt(document.getElementById("reflectVerticalX").value, 10);
+      let shape = shapes[selectedShapeIndex];
+      shape.transformed = shape.transformed.map(pt => ({ x: 2 * a - pt.x, y: pt.y }));
+      shape.log.reflection.customVertical += 1;
+      updateTransformationLog();
+      redraw();
+    });
+    // Custom reflection about a horizontal line: for line y = b, new y = 2b - y.
+    document.getElementById("reflectHorizontalBtn").addEventListener("click", () => {
+      if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
+      let b = parseInt(document.getElementById("reflectHorizontalY").value, 10);
+      let shape = shapes[selectedShapeIndex];
+      shape.transformed = shape.transformed.map(pt => ({ x: pt.x, y: 2 * b - pt.y }));
+      shape.log.reflection.customHorizontal += 1;
       updateTransformationLog();
       redraw();
     });
 
-    // Rotation: Corrected so that "90° Counterclockwise" rotates CCW and "90° Clockwise" rotates CW.
+    // Rotation about the origin
     document.getElementById("rotateBtn").addEventListener("click", () => {
       if (selectedShapeIndex === null) { alert("Please select a shape first."); return; }
       const angleDeg = parseInt(document.getElementById("rotationSelect").value, 10);
-      if (angleDeg === 0) return;  // No rotation needed.
+      if (angleDeg === 0) return;
       let shape = shapes[selectedShapeIndex];
-      // Standard rotation formula for counterclockwise rotation:
-      // (x, y) -> (x*cosθ - y*sinθ, x*sinθ + y*cosθ)
       function rotatePoint(pt, angle) {
         let rad = angle * Math.PI / 180;
         let newX = pt.x * Math.cos(rad) - pt.y * Math.sin(rad);
@@ -419,7 +444,6 @@
         return { x: Math.round(newX), y: Math.round(newY) };
       }
       shape.transformed = shape.transformed.map(pt => rotatePoint(pt, angleDeg));
-      // Update cumulative rotation (normalize later)
       shape.log.rotation = (shape.log.rotation + angleDeg) % 360;
       updateTransformationLog();
       redraw();
